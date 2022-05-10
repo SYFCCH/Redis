@@ -442,11 +442,24 @@ redis master 和slave 数据复制是异步的，像前面说的MySQL差不多(�
 
 ![img_26.png](img_26.png)   
 
-2. 脑裂导致的数据丢失
+2. (脑裂)网络分区导致的数据丢失
+脑裂其实就是网络分区导致的现象，比如，我们的master机器网络突然不正常了发生了网络分区，和其他的slave机器不能正常通信了，其实master并没有挂还活着好好的呢，但是哨兵可不是吃闲饭的啊，它会认为master挂掉了啊，那么问题来了，client可能还在继续写master的呀，还没来得及更新到新的master呢，那这部分数据就会丢失。
 
+![img_27.png](img_27.png)    
 
 
 3. 解决方案   
+在redis.conf配置文件中加两个配置  
+```
+min-slaves-to-write 1 # 要求至少一个slave
+min-slaves-max-lag 10 # 数据复制和同步的延迟不能超过10s
+```
+核心思想就是，一旦所有的slave节点，在数据复制和同步时延迟超过10秒的话，那么master它就不会再接客户端的请求了，这样就会有效减少大量数据丢失的发生。  
+
+现在当我们的slave在数据复制的时候，发现返回的ACK时延太长达到了 min-slaves-max-lag 配置，这个时候就会认为如果master宕机就会导致大量数据丢失，所以就提前进行了预测，**就不再去接收客户端的任何请求了**，来将丢失的数据降低在可控范围内。   
+
+然后要至少有一个从机来发现master宕机了(超时)
+![img_28.png](img_28.png)       
 
 
 
@@ -454,6 +467,49 @@ redis master 和slave 数据复制是异步的，像前面说的MySQL差不多(�
 ###### 领导者Sentinel节点选举   
 
 Sentinel节点之间会做一个领导者选举的工作，选出一个Sentinel节点作为领导者进行故障转移的工作。Redis使用了Raft算法实现领导者选举。
+
+Raft算法：   
+Raft和Paxos一样只要保证n/2+1节点正常就能够提供服务；众所周知但问题较为复杂时可以把问题分解为几个小问题来处理，Raft也使用了分而治之的思想把算法流程分为三个子问题：选举（Leader election）、日志复制（Log replication）、安全性（Safety）三个子问题；这里先简单介绍下Raft的流程;
+
+
+Raft开始时在集群中选举出Leader负责日志复制的管理，Leader接受来自客户端的事务请求（日志），并将它们复制给集群的其他节点，然后负责通知集群中其他节点提交日志，Leader负责保证其他节点与他的日志同步，当Leader宕掉后集群其他节点会发起选举选出新的Leader；   
+
+
+1. 角色   
+Raft算法支持领导者（Leader）、跟随者（Follower）和候选人（Candidate）3种状态：
+
+* 领导者：负责处理写请求、管理日志复制和不断地发送心跳信息，通知其他节点“我是领导者，我还活着，你们现在不要发起新的选举，找个新领导者来替代我”
+* 跟随者：接收和处理来自领导者的消息，当等待领导者心跳信息超时的时候，就主动站出来，推荐自己当候选人
+* 候选人：候选人将向其他节点发送请求投票（RequestVote）RPC消息，通知其他节点来投票，如果赢得了大多数选票，就晋升当领导者
+
+
+2. Term   
+在Raft中使用了一个可以理解为周期（第几届、任期）的概念，用Term作为一个周期，每个Term都是一个连续递增的编号，每一轮选举都是一个Term周期，在一个Term中只能产生一个Leader；先简单描述下Term的变化流程： Raft开始时所有Follower的Term为1，其中一个Follower逻辑时钟到期后转换为Candidate，Term加1这是Term为2（任期），然后开始选举，这时候有几种情况会使Term发生改变：
+* 如果当前Term为2的任期内没有选举出Leader或出现异常，则Term递增，开始新一任期选举
+* 当这轮Term为2的周期选举出Leader后，过后Leader宕掉了，然后其他Follower转为Candidate，Term递增，开始新一任期选举
+* 当Leader或Candidate发现自己的Term比别的Follower小时Leader或Candidate将转为Follower，Term递增
+* 当Follower的Term比别的Term小时Follower也将更新Term保持与其他Follower一致；     
+可以说每次Term的递增都将发生新一轮的选举，Raft保证一个Term只有一个Leader，在Raft正常运转中所有的节点的Term都是一致的，如果节点不发生故障一个Term（任期）会一直保持下去，当某节点收到的请求中Term比当前Term小时则拒绝该请求；
+
+
+3. 选举（Election）    
+Raft的选举由定时器来触发，每个节点的选举定时器时间都是不一样的，开始时状态都为Follower某个节点定时器触发选举后Term递增，状态由Follower转为Candidate，向其他节点发起RequestVote RPC请求，这时候有三种可能的情况发生：
+1：该RequestVote请求接收到n/2+1（过半数）个节点的投票，从Candidate转为Leader，向其他节点发送heartBeat以保持Leader的正常运转
+2：在此期间如果收到其他节点发送过来的AppendEntries RPC请求，如该节点的Term大则当前节点转为Follower，否则保持Candidate拒绝该请求
+3：Election timeout发生则Term递增，重新发起选举
+在一个Term期间每个节点只能投票一次，所以当有多个Candidate存在时就会出现每个Candidate发起的选举都存在接收到的投票数都不过半的问题，这时每个Candidate都将Term递增、重启定时器并重新发起选举，由于每个节点中定时器的时间都是随机的，所以就不会多次存在有多个Candidate同时发起投票的问题。
+有这么几种情况会发起选举，1：Raft初次启动，不存在Leader，发起选举；2：Leader宕机或Follower没有接收到Leader的heartBeat，发生election timeout从而发起选举;
+
+
+4、日志复制（Log Replication）
+日志复制（Log Replication）主要作用是用于保证节点的一致性，这阶段所做的操作也是为了保证一致性与高可用性；当Leader选举出来后便开始负责客户端的请求，所有事务（更新操作）请求都必须先经过Leader处理，这些事务请求或说成命令也就是这里说的日志，我们都知道要保证节点的一致性就要保证每个节点都按顺序执行相同的操作序列，日志复制（Log Replication）就是为了保证执行相同的操作序列所做的工作；在Raft中当接收到客户端的日志（事务请求）后先把该日志追加到本地的Log中，然后通过heartbeat把该Entry同步给其他Follower，Follower接收到日志后记录日志然后向Leader发送ACK，当Leader收到大多数（n/2+1）Follower的ACK信息后将该日志设置为已提交并追加到本地磁盘中，通知客户端并在下个heartbeat中Leader将通知所有的Follower将该日志存储在自己的本地磁盘中。
+5、安全性（Safety）
+安全性是用于保证每个节点都执行相同序列的安全机制，如当某个Follower在当前Leader commit Log时变得不可用了，稍后可能该Follower又会倍选举为Leader，这时新Leader可能会用新的Log覆盖先前已committed的Log，这就是导致节点执行不同序列；Safety就是用于保证选举出来的Leader一定包含先前 commited Log的机制；
+选举安全性（Election Safety）
+每个Term只能选举出一个Leader
+Leader完整性（Leader Completeness）
+这里所说的完整性是指Leader日志的完整性，当Log在Term1被Commit后，那么以后Term2、Term3…等的Leader必须包含该Log；Raft在选举阶段就使用Term的判断用于保证完整性：当请求投票的该Candidate的Term较大或Term相同Index更大则投票，否则拒绝该请求；   
+
 
 ###### 故障转移  
 
