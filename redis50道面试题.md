@@ -15,10 +15,10 @@ Redis是一种基于键值对（key-value）的NoSQL数据库。
 
 ##### 2.Redis可以用来干什么？    
 ![img_1.png](img_1.png)   
-
-1. 缓存
-![img_2.png](img_2.png)     
-这是Redis应用最广泛地方，基本所有的Web应用都会使用Redis作为缓存，来降低数据源压力，提高响应速度。图片
+  
+1. 缓存    
+这是Redis应用最广泛地方，基本所有的Web应用都会使用Redis作为缓存，来降低数据源压力，提高响应速度。   
+![img_2.png](img_2.png)       
 
 2. 计数器 Redis天然支持计数功能，而且计数性能非常好，可以用来记录浏览量、点赞量等等。
 
@@ -45,6 +45,39 @@ Redis的应用一般会结合项目去问，以一个电商项目的用户服务
 
 字符串最基础的数据结构。字符串类型的值实际可以是字符串（简单的字符串、复杂的字符串（例如JSON、XML））、数字 （整数、浮点数），甚至是二进制（图片、音频、视频），但是值最大不能超过512MB。
 
+```
+set <key><value>：添加键值对
+
+get <key>：查询对应键值
+
+append <key><value>：将给定的 <value> 追加到原值的末尾
+
+strlen <key>：获得值的长度
+
+setnx <key><value>：只有在 key 不存在时，设置 key 的值
+
+incr <key>：将 key 中储存的数字值增 1，只能对数字值操作，如果为空，新增值为 1（**具有原子性**）
+
+decr <key>：将 key 中储存的数字值减 1，只能对数字值操作，如果为空，新增值为 -1
+
+incrby/decrby <key><步长>：将 key 中储存的数字值增减。自定义步长
+
+mset <key1><value1><key2><value2> ：同时设置一个或多个 key-value 对
+
+mget <key1><key2><key3>...：同时获取一个或多个 value
+
+msetnx <key1><value1><key2><value2>... ：同时设置一个或多个 key-value 对，当且仅当所有给定 key 都不存在
+
+getrange <key><起始位置><结束位置>：获得值的范围
+
+setrange <key><起始位置><value>：用 <value> 覆写 <key> 所储存的字符串值
+
+setex <key><过期时间><value>：设置键值的同时，设置过期时间，单位秒。
+
+getset <key><value>：以新换旧，设置了新值同时获得旧值。
+```
+
+
 字符串主要有以下几个典型使用场景：   
 * 缓存功能
 * 计数
@@ -52,8 +85,35 @@ Redis的应用一般会结合项目去问，以一个电商项目的用户服务
 * 限速   
 
 **hash**
+Redis hash 是一个键值对集合。
 
-哈希类型是指键值本身又是一个键值对结构。
+Redis hash 是一个 String 类型的 field 和 value 的映射表，hash 特别适合用于存储对象。    
+
+```
+hset <key><field><value>：给 <key> 集合中的 <field> 键赋值 <value>
+
+hget <key1><field>：从 <key1> 集合 <field> 取出 value
+
+hmset <key1><field1><value1><field2><value2>...： 批量设置 hash 的值
+
+hexists <key1><field>：查看哈希表 key 中，给定域 field 是否存在
+
+hkeys <key>：列出该 hash 集合的所有 field
+
+hvals <key>：列出该 hash 集合的所有 value
+
+hincrby <key><field><increment>：为哈希表 key 中的域 field 的值加上增量 1 -1
+
+hsetnx <key><field><value>：将哈希表 key 中的域 field 的值设置为 value ，当且仅当域 field 不存在
+
+```
+
+数据结构
+
+Hash 类型对应的数据结构是两种：ziplist（压缩列表），hashtable（哈希表）。
+
+当 field-value 长度较短且个数较少时，使用 ziplist，否则使用 hashtable
+
 
 哈希主要有以下典型应用场景：
 
@@ -62,9 +122,48 @@ Redis的应用一般会结合项目去问，以一个电商项目的用户服务
 
 
 **list**
+Redis 列表是简单的字符串列表，按照插入顺序排序。你可以添加一个元素到列表的头部（左边）或者尾部（右边）。
 
-列表（list）类型是用来存储多个有序的字符串。列表是一种比较灵活的数据结构，它可以充当栈和队列的角色
+它的底层实际是个双向链表，对两端的操作性能很高，通过索引下标的操作中间的节点性能会较差。
 
+
+```
+lpush/rpush <key><value1><value2><value3> ....： 从左边/右边插入一个或多个值。
+
+1
+lpush k1 v1 v2 v3lrange k1 0 -1输出：v3 v2 v1rpush k1 v1 v2 v3rrange k1 0 -1输出：v1 v2 v3
+lpop/rpop <key>：从左边/右边吐出一个值。值在键在，值光键亡。
+
+rpoplpush <key1><key2>：从 <key1> 列表右边吐出一个值，插到 <key2> 列表左边。
+
+lrange <key><start><stop>：按照索引下标获得元素（从左到右）
+
+lrange mylist 0 -1 0：左边第一个，-1右边第一个，（0 -1表示获取所有）
+
+lindex <key><index>：按照索引下标获得元素（从左到右）
+
+llen <key>：获得列表长度
+
+linsert <key> before/after <value><newvalue>：在 <value> 的前面/后面插入 <newvalue> 插入值
+
+lrem <key><n><value>：从左边删除 n 个 value（从左到右）
+
+lset<key><index><value>：将列表 key 下标为 index 的值替换成 value
+```
+
+数据结构
+
+List 的数据结构为快速链表 quickList。
+
+首先在列表元素较少的情况下会使用一块连续的内存存储，这个结构是 ziplist，也即是压缩列表。
+
+它将所有的元素紧挨着一起存储，分配的是一块连续的内存。
+
+当数据量比较多的时候才会改成 quicklist。
+
+因为普通的链表需要的附加指针空间太大，会比较浪费空间。比如这个列表里存的只是 int 类型的数据，结构上还需要两个额外的指针 prev 和 next。
+
+Redis 将链表和 ziplist 结合起来组成了 quicklist。也就是将多个 ziplist 使用双向指针串起来使用。这样既满足了快速的插入删除性能，又不会出现太大的空间冗余。
 列表主要有以下几种使用场景：
 
 * 消息队列
@@ -72,7 +171,12 @@ Redis的应用一般会结合项目去问，以一个电商项目的用户服务
 
 **set**   
 
-集合（set）类型也是用来保存多个的字符串元素，但和列表类型不一 样的是，集合中不允许有重复元素，并且集合中的元素是无序的。
+集合（Set 对外提供的功能与 List 类似列表的功能，特殊之处在于 Set 是可以 自动排重 的，当需要存储一个列表数据，又不希望出现重复数据时，Set 是一个很好的选择，并且 Set 提供了判断某个成员是否在一个 Set 集合内的重要接口，这个也是 List 所不能提供的。
+
+Redis 的 Set 是 String 类型的无序集合。它底层其实是一个 value 为 null 的 hash 表，所以添加，删除，查找的复杂度都是 ***O(1)***。
+
+一个算法，随着数据的增加，执行时间的长短，如果是 ***O(1)***，数据增加，查找数据的时间不变。
+
 
 集合主要有如下使用场景：
 
@@ -84,7 +188,7 @@ sadd
 语法：sadd key value   
 作用：将一个或多个值 value 加入到集合中   
 返回值：数字，添加成功的个数，如果元素已经存在，则不会添加   
-
+```
 Smembers    
 语法：smembers key   
 作用：获取集合中所有的元素    
@@ -119,21 +223,57 @@ sunion
 
 sdiff    
 两个集合的差集       
+```
 
+数据结构
+
+Set 数据结构是字典，字典是用哈希表实现的。
 
 **zset**   
 
-Redis zset 和 set 一样也是string类型元素的集合,且不允许重复的成员。
 
-不同的是每个元素都会关联一个double类型的分数。redis正是通过分数来为集合中的成员进行从小到大的排序。
+Redis 有序集合 zset 与普通集合 set 非常相似，是一个没有重复元素的字符串集合。
 
-zset的成员是唯一的,但分数(score)却可以重复。     
+不同之处是有序集合的每个成员都关联了一个评分（score）,这个评分（score）被用来按照从最低分到最高分的方式排序集合中的成员。集合的成员是唯一的，但是评分可以是重复的。
+
+因为元素是有序的，所以可以很快的根据评分（score）或者次序（position）来获取一个范围的元素。
+
+访问有序集合的中间元素也是非常快的，因此能够使用有序集合作为一个没有重复成员的智能列表。
+```
+zadd <key><score1><value1><score2><value2>…：将一个或多个 member 元素及其 score 值加入到有序集 key 当中
+
+zrange <key><start><stop> [WITHSCORES] ：返回有序集 key 中，下标在 <start><stop> 之间的元素
+
+当带 WITHSCORES，可以让分数一起和值返回到结果集
+
+zrangebyscore key min max [withscores] [limit offset count]：返回有序集 key 中，所有 score 值介于 min 和 max 之间（包括等于 min 或 max ）的成员。有序集成员按 score 值递增（从小到大）次序排列。
+
+zrevrangebyscore key max min [withscores] [limit offset count] ：同上，改为从大到小排列
+
+zincrby <key><increment><value>：为元素的 score 加上增量
+
+zrem <key><value>：删除该集合下，指定值的元素
+
+zcount <key><min><max>：统计该集合，分数区间内的元素个数
+
+zrank <key><value>：返回该值在集合中的排名，从 0 开始。
+```
+数据结构
+
+SortedSet（zset）是 Redis 提供的一个非常特别的数据结构，一方面它等价于 Java 的数据结构 ***Map<String, Double>***，可以给每一个元素 value 赋予一个权重 score，另一方面它又类似于 TreeSet，内部的元素会按照权重 score 进行排序，可以得到每个元素的名次，还可以通过 score 的范围来获取元素的列表。
+
+zset 底层使用了两个数据结构
+
+hash，hash 的作用就是关联元素 value 和权重 score，保障元素 value 的唯一性，可以通过元素 value 找到相应的 score 值
+
+跳跃表，跳跃表的目的在于给元素 value 排序，根据 score 的范围获取元素列表
+
+实现方式：zset的内部使用HashMap和跳跃表(SkipList)来保证数据的存储和有序，HashMap里放的是成员到score的映射，而跳跃表里存放的是所有的成员，排序依据是HashMap里存的score,使用跳跃表的结构可以获得比较高的查找效率，并且在实现上比较简单。
 
 使用场景：  
 * 根据时间排序的新闻列表等，
 * 阅读排行榜
 
-实现方式：zset的内部使用HashMap和跳跃表(SkipList)来保证数据的存储和有序，HashMap里放的是成员到score的映射，而跳跃表里存放的是所有的成员，排序依据是HashMap里存的score,使用跳跃表的结构可以获得比较高的查找效率，并且在实现上比较简单。
 
 ##### 4.Redis为什么快呢？
 
